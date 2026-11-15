@@ -34,26 +34,16 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
-          key: android-release
+          key: android-release2
       - run: pnpm install --frozen-lockfile
       - name: Init android project
         run: pnpm tauri android init --ci
-      - name: Decode keystore
-        run: echo "$KEYSTORE_B64" | base64 -d > release.keystore
-      - name: Build release APK (arm64)
+      - name: Build release APK
         run: pnpm tauri android build --apk --target aarch64
-      - name: Sign APK
+      - name: Collect APK
         run: |
-          set -e
-          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*release*.apk' ! -name '*unsigned*' | head -1)
-          if [ -z "$APK" ]; then APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*-release-unsigned.apk' | head -1); fi
-          echo "found: $APK"
-          BT=$(ls "$ANDROID_SDK_ROOT/build-tools" | sort -V | tail -1)
-          "$ANDROID_SDK_ROOT/build-tools/$BT/apksigner" sign \
-            --ks release.keystore --ks-key-alias hghub \
-            --ks-pass pass:hghub2026 --key-pass pass:hghub2026 \
-            --v4-signing-enabled false \
-            --out out/HGhub-release.apk "$APK" || cp "$APK" out/HGhub-release.apk
+          mkdir -p out
+          find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -exec cp {} out/ \;
           ls -lh out
       - uses: actions/upload-artifact@v5
         with:
