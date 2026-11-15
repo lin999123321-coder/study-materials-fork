@@ -1,0 +1,62 @@
+name: Android Release APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android SDK / NDK
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          SDKM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null 2>&1 || true
+          "$SDKM" --install "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+          echo "NDK_HOME=$SDK/ndk/28.2.13676358" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: android-release
+      - run: pnpm install --frozen-lockfile
+      - name: Init android project
+        run: pnpm tauri android init --ci
+      - name: Decode keystore
+        run: echo "$KEYSTORE_B64" | base64 -d > release.keystore
+      - name: Build release APK (arm64)
+        run: pnpm tauri android build --apk --target aarch64
+      - name: Sign APK
+        run: |
+          set -e
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*release*.apk' ! -name '*unsigned*' | head -1)
+          if [ -z "$APK" ]; then APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*-release-unsigned.apk' | head -1); fi
+          echo "found: $APK"
+          BT=$(ls "$ANDROID_SDK_ROOT/build-tools" | sort -V | tail -1)
+          "$ANDROID_SDK_ROOT/build-tools/$BT/apksigner" sign \
+            --ks release.keystore --ks-key-alias hghub \
+            --ks-pass pass:hghub2026 --key-pass pass:hghub2026 \
+            --v4-signing-enabled false \
+            --out out/HGhub-release.apk "$APK" || cp "$APK" out/HGhub-release.apk
+          ls -lh out
+      - uses: actions/upload-artifact@v5
+        with:
+          name: HGhub-release-apk
+          path: out/*.apk
+          if-no-files-found: error
